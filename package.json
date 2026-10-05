@@ -1,0 +1,17 @@
+{
+  "name": "socketio-lab",
+  "version": "1.0.0",
+  "description": "Interaktywny projekt demonstracyjny Socket.io w Node.js – WebSockets i komunikacja w czasie rzeczywistym",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --watch-path=src --env-file-if-exists=.env src/server.js",
+    "client": "node examples/client-console.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  }
+}

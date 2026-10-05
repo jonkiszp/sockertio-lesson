@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Socket.io Lab – WebSockets i komunikacja w czasie rzeczywistym</title>
+  <meta name="description" content="Interaktywna demonstracja Socket.io w Node.js: połączenia, emisje socket.emit, broadcast, io.emit, pokoje (rooms) oraz acknowledgements.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <!-- Główny nagłówek -->
+  <header class="hero">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <span>Socket.io&nbsp;Lab</span>
+      <span class="pill">Lekcja 92 &amp; 93</span>
+    </div>
+    <h1>Komunikacja dwukierunkowa <span class="grad">w czasie rzeczywistym</span></h1>
+    <p class="lead">
+      Praktyczna demonstracja gniazd sieciowych (WebSockets) w Node.js:
+      cykl życia połączenia, pokoje (<code>rooms</code>), rodzaje emisji oraz obsługa potwierdzeń.
+    </p>
+  </header>
+
+  <!-- Pasek stanu połączenia na żywo (HUD) -->
+  <section class="hud" aria-label="Status połączenia">
+    <div class="hud-item">
+      <span class="status-dot disconnected" id="hud-dot"></span>
+      <div>
+        <span class="hud-label">Status</span>
+        <strong id="hud-status">Łączenie...</strong>
+      </div>
+    </div>
+    <div class="hud-divider"></div>
+    <div class="hud-item">
+      <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+      <div>
+        <span class="hud-label">Socket ID</span>
+        <strong class="mono" id="hud-socket-id">brak</strong>
+      </div>
+    </div>
+    <div class="hud-divider"></div>
+    <div class="hud-item">
+      <svg viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></svg>
+      <div>
+        <span class="hud-label">Transport</span>
+        <strong class="mono" id="hud-transport">--</strong>
+      </div>
+    </div>
+    <div class="hud-divider"></div>
+    <div class="hud-item">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <div>
+        <span class="hud-label">Opóźnienie (Ping)</span>
+        <strong class="mono" id="hud-latency">-- ms</strong>
+      </div>
+    </div>
+    <div class="hud-divider"></div>
+    <div class="hud-item">
+      <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <div>
+        <span class="hud-label">Klientów online</span>
+        <strong id="hud-clients">1</strong>
+      </div>
+    </div>
+    <div class="hud-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="btn-reconnect" title="Wymuś ponowne połączenie">
+        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+        Połącz ponownie
+      </button>
+      <a href="/api/status" target="_blank" class="btn btn-ghost btn-sm" title="Otwórz status REST API w nowej karcie">
+        REST API ↗
+      </a>
+    </div>
+  </section>
+
+  <!-- Przepływ protokołu: Handshake -> Polling -> Upgrade -> WebSocket -->
+  <section class="flow" aria-label="Schemat nawiązywania połączenia Socket.io">
+    <div class="flow-step" id="flow-http">
+      <div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg></div>
+      <strong>1. HTTP Handshake</strong>
+      <small><code>GET /socket.io/?EIO=4</code></small>
+    </div>
+    <div class="flow-line"><i></i></div>
+    <div class="flow-step" id="flow-polling">
+      <div class="flow-icon"><svg viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg></div>
+      <strong>2. Long-Polling</strong>
+      <small>Fallback &amp; Identyfikacja SID</small>
+    </div>
+    <div class="flow-line"><i></i></div>
+    <div class="flow-step" id="flow-upgrade">
+      <div class="flow-icon"><svg viewBox="0 0 24 24"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg></div>
+      <strong>3. Upgrade protokołu</strong>
+      <small>Nagłówek <code>Upgrade: websocket</code></small>
+    </div>
+    <div class="flow-line"><i></i></div>
+    <div class="flow-step active" id="flow-ws">
+      <div class="flow-icon"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+      <strong>4. Pełny duplex (WebSocket)</strong>
+      <small>Trwałe, dwukierunkowe gniazdo</small>
+    </div>
+  </section>
+
+  <!-- Zakładki główne -->
+  <nav class="nav-tabs" role="tablist">
+    <button class="tab-btn active" role="tab" aria-selected="true" data-tab="tab-chat">
+      <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Czat i Pokoje (Rooms)
+    </button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="tab-playground">
+      <svg viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+      Poligon Emisji (Playground)
+    </button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="tab-inspector">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      Inspektor Pakietów na żywo
+      <span class="badge" id="packet-counter">0</span>
+    </button>
+  </nav>
+
+  <!-- Zawartość zakładek -->
+  <main class="lab">
+    <!-- ================= ZAKŁADKA 1: CZAT & POKOJE ================= -->
+    <section class="tab-content active" id="tab-chat">
+      <div class="chat-layout">
+        <!-- Lewa kolumna: Konfiguracja użytkownika i pokoi -->
+        <aside class="chat-sidebar">
+          <div class="panel">
+            <h3 class="panel-title">Twój profil</h3>
+            <div class="field">
+              <label for="input-nickname">Pseudonim (Nick):</label>
+              <div class="input-with-action">
+                <input type="text" id="input-nickname" maxlength="20" placeholder="np. Student_5A" value="Uczeń_1">
+                <button type="button" class="btn btn-sm btn-primary" id="btn-save-nick">Ustaw</button>
+              </div>
+            </div>
+
+            <div class="field" style="margin-top: 18px;">
+              <label>Wybierz pokój (<code>socket.join</code>):</label>
+              <div class="room-selector" id="room-list">
+                <button type="button" class="room-chip active" data-room="ogolny">#ogolny</button>
+                <button type="button" class="room-chip" data-room="programowanie">#programowanie</button>
+                <button type="button" class="room-chip" data-room="szkola">#szkola</button>
+                <button type="button" class="room-chip" data-room="boty">#boty</button>
+              </div>
+            </div>
+
+            <div class="field" style="margin-top: 14px;">
+              <label for="input-custom-room">Własny pokój:</label>
+              <div class="input-with-action">
+                <input type="text" id="input-custom-room" placeholder="nazwa-pokoju">
+                <button type="button" class="btn btn-sm btn-secondary" id="btn-join-custom-room">Dołącz</button>
+              </div>
+            </div>
+
+            <hr class="divider">
+
+            <div class="room-members-box">
+              <span class="hud-label">Obecni w pokoju <code id="current-room-name">#ogolny</code>:</span>
+              <ul class="users-list" id="users-in-room-list">
+                <li><span class="dot-online"></span> Ty (ładowanie...)</li>
+              </ul>
+            </div>
+
+            <hr class="divider">
+
+            <div class="quick-tools">
+              <span class="hud-label">Narzędzia testowe:</span>
+              <button type="button" class="btn btn-outline btn-sm w-full" id="btn-spawn-simulated-client">
+                <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                Symuluj 2. klienta (Wirtualny Bot)
+              </button>
+              <small class="hint-text">
+                💡 Możesz też po prostu otworzyć tę stronę w <strong>nowym oknie/karcie</strong> lub odpalić w terminalu <code>npm run client</code>!
+              </small>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Prawa kolumna: Okno wiadomości i wysyłanie -->
+        <div class="chat-main panel">
+          <div class="chat-header">
+            <div>
+              <span class="chat-channel-tag">Kanał:</span>
+              <h2 id="chat-header-title">#ogolny</h2>
+            </div>
+            <div class="chat-meta">
+              <span id="chat-mode-desc">Komunikacja ograniczona do obecnego pokoju</span>
+            </div>
+          </div>
+
+          <div class="chat-messages" id="chat-messages">
+            <div class="system-message">
+              <span>Witaj w czacie Socket.io. Wybierz nick lub wyślij pierwszą wiadomość.</span>
+            </div>
+          </div>
+
+          <!-- Wskaźnik pisania -->
+          <div class="typing-indicator" id="typing-indicator" style="display: none;">
+            <div class="typing-dots"><span></span><span></span><span></span></div>
+            <span id="typing-text">Ktoś pisze...</span>
+          </div>
+
+          <!-- Formularz wysyłania wiadomości -->
+          <form class="chat-composer" id="chat-form">
+            <input type="text" id="chat-input" placeholder="Wpisz wiadomość i naciśnij Enter..." autocomplete="off">
+            <button type="submit" class="btn btn-primary" id="btn-send-message">
+              <span>Wyślij</span>
+              <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </form>
+
+          <div class="quick-snippets">
+            <span class="hint-text">Szybkie przykłady:</span>
+            <button type="button" class="btn-chip" data-text="Cześć wszystkim! Testuję WebSockets w Node.js 🚀">„Cześć wszystkim!”</button>
+            <button type="button" class="btn-chip" data-text="Czy Socket.io działa szybciej niż polling HTTP?">„Czy Socket.io jest szybsze?”</button>
+            <button type="button" class="btn-chip" data-text="Pozdrowienia z lekcji programowania!">„Pozdrowienia z lekcji”</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= ZAKŁADKA 2: POLIGON EMISJI (PLAYGROUND) ================= -->
+    <section class="tab-content" id="tab-playground">
+      <div class="playground-grid">
+
+        <!-- 1. socket.emit() -->
+        <article class="card">
+          <div class="card-badge bg-cyan">socket.emit()</div>
+          <h3>Emisja zwrotna (Unicast)</h3>
+          <p class="card-desc">
+            Wiadomość trafia <strong>wyłącznie do klienta</strong>, który wywołał zdarzenie. Idealne do odpowiedzi na zapytania, potwierdzeń i prywatnych komunikatów.
+          </p>
+          <pre class="code-box"><code>// Serwer:
+socket.emit('odpowiedz', { ok: true });</code></pre>
+          <div class="card-actions">
+            <input type="text" class="card-input" id="input-self" value="Prywatne zapytanie tylko dla mnie" placeholder="Treść...">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-test-self">Wyślij do siebie</button>
+          </div>
+        </article>
+
+        <!-- 2. socket.broadcast.emit() -->
+        <article class="card">
+          <div class="card-badge bg-pink">socket.broadcast.emit()</div>
+          <h3>Rozgłoszenie (Wszyscy oprócz mnie)</h3>
+          <p class="card-desc">
+            Wysyła zdarzenie do <strong>wszystkich podłączonych klientów z wyjątkiem nadawcy</strong>. Kluczowe przy powiadomieniach o dołączeniu czy pisaniu.
+          </p>
+          <pre class="code-box"><code>// Serwer:
+socket.broadcast.emit('powiadomienie', data);</code></pre>
+          <div class="card-actions">
+            <input type="text" class="card-input" id="input-broadcast" value="Wiadomość do każdego z wyjątkiem nadawcy!" placeholder="Treść...">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-test-broadcast">Wyślij do innych</button>
+          </div>
+        </article>
+
+        <!-- 3. io.emit() -->
+        <article class="card">
+          <div class="card-badge bg-violet">io.emit()</div>
+          <h3>Globalny Broadcast (Do wszystkich)</h3>
+          <p class="card-desc">
+            Rozsyła komunikat do <strong>absolutnie każdego</strong> podłączonego gniazda (włącznie z nadawcą wiadomości).
+          </p>
+          <pre class="code-box"><code>// Serwer:
+io.emit('ogolny_alert', { tresc: '...' });</code></pre>
+          <div class="card-actions">
+            <input type="text" class="card-input" id="input-global" value="Komunikat do całego serwera!" placeholder="Treść...">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-test-global">Wyślij do wszystkich</button>
+          </div>
+        </article>
+
+        <!-- 4. io.to(pokój).emit() -->
+        <article class="card">
+          <div class="card-badge bg-green">io.to(pokoj).emit()</div>
+          <h3>Pokoje (Rooms / Channels)</h3>
+          <p class="card-desc">
+            Komunikat trafia tylko do gniazd, które wcześniej wywołały <code>socket.join(room)</code>. Podstawa pokojów rozmów, gier i subskrypcji.
+          </p>
+          <pre class="code-box"><code>// Serwer:
+io.to('programowanie').emit('nowy_kod', data);</code></pre>
+          <div class="card-actions">
+            <select class="card-select" id="select-playground-room">
+              <option value="ogolny">#ogolny</option>
+              <option value="programowanie">#programowanie</option>
+              <option value="szkola">#szkola</option>
+            </select>
+            <input type="text" class="card-input" id="input-room-msg" value="Wiadomość dedykowana dla pokoju" placeholder="Treść...">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-test-room">Wyślij do pokoju</button>
+          </div>
+        </article>
+
+        <!-- 5. Acknowledgements (Potwierdzenia zwrotne) -->
+        <article class="card">
+          <div class="card-badge bg-amber">Ack Callback</div>
+          <h3>Wzorzec Żądanie-Odpowiedź (RPC)</h3>
+          <p class="card-desc">
+            Socket.io pozwala przekazać <strong>funkcję zwrotną</strong> jako ostatni argument. Serwer wywołuje ją z danymi zwrotnymi, symulując zapytanie REST w kanale WebSocket!
+          </p>
+          <pre class="code-box"><code>// Klient:
+socket.emit('zapisz', dane, (odpowiedz) => {
+  console.log('Odebrano ACK:', odpowiedz);
+});</code></pre>
+          <div class="card-actions">
+            <button type="button" class="btn btn-warning btn-sm w-full" id="btn-test-ack">
+              Przetestuj żądanie z callbackiem (Ack)
+            </button>
+          </div>
+          <div class="ack-result" id="ack-result-box" style="display: none;"></div>
+        </article>
+
+        <!-- 6. REST API Express -> Socket.io Broadcast -->
+        <article class="card">
+          <div class="card-badge bg-red">REST → Socket.io</div>
+          <h3>Emisja z zewnętrznego żądania HTTP</h3>
+          <p class="card-desc">
+            Wysyłamy tradycyjne żądanie <code>POST /api/broadcast</code> do serwera Express, a serwer natychmiast rozsyła je do wszystkich klientów przez Socket.io.
+          </p>
+          <pre class="code-box"><code>app.post('/api/broadcast', (req, res) => {
+  io.emit('system:alert', req.body);
+  res.json({ ok: true });
+});</code></pre>
+          <div class="card-actions">
+            <button type="button" class="btn btn-danger btn-sm w-full" id="btn-test-rest-broadcast">
+              Wyślij alert przez REST POST /api/broadcast
+            </button>
+          </div>
+        </article>
+      </div>
+
+      <!-- Wynik ostatniego testu z poligonu -->
+      <section class="playground-feedback panel" style="margin-top: 24px;">
+        <div class="feedback-header">
+          <h3>Odebrane wyniki emisji (Playground Events):</h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-playground-results">Wyczyść</button>
+        </div>
+        <div class="feedback-list" id="playground-results-list">
+          <div class="empty-state">Kliknij jeden z powyższych przycisków, aby przetestować dany wzorzec emisji.</div>
+        </div>
+      </section>
+    </section>
+
+    <!-- ================= ZAKŁADKA 3: INSPEKTOR PAKIETÓW (SNIFFER) ================= -->
+    <section class="tab-content" id="tab-inspector">
+      <div class="panel inspector-panel">
+        <div class="inspector-controls">
+          <div>
+            <h3 class="panel-title" style="margin-bottom: 4px;">Monitor pakietów w czasie rzeczywistym</h3>
+            <p class="hint-text">Śledź w locie każde zdarzenie przychodzące i wychodzące przez socket.</p>
+          </div>
+          <div class="inspector-buttons">
+            <label class="toggle-label">
+              <input type="checkbox" id="check-autoscroll" checked>
+              Auto-scroll
+            </label>
+            <button type="button" class="btn btn-outline btn-sm" id="btn-clear-logs">Wyczyść historię</button>
+          </div>
+        </div>
+
+        <div class="inspector-table-container">
+          <table class="inspector-table">
+            <thead>
+              <tr>
+                <th style="width: 100px;">Czas</th>
+                <th style="width: 80px;">Kierunek</th>
+                <th style="width: 220px;">Nazwa zdarzenia (Event)</th>
+                <th>Ładunek danych (Payload / Data)</th>
+              </tr>
+            </thead>
+            <tbody id="inspector-tbody">
+              <!-- dynamiczne wpisy -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Ręczny emiter zdarzeń -->
+        <div class="manual-emitter">
+          <h4>Ręczna emisja niestandardowego zdarzenia (Custom Event Emitter):</h4>
+          <div class="manual-form">
+            <input type="text" id="manual-event-name" placeholder="np. custom:moje_zdarzenie" value="test:wlasne">
+            <input type="text" id="manual-event-payload" placeholder='{"wiadomosc": "Hello"}' value='{"autor": "Jan", "kod": 200}'>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-send-manual-event">Wyślij zdarzenie</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Pływające powiadomienia Toast -->
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  <!-- Biblioteka klienta Socket.io serwowana automatycznie przez serwer -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
